@@ -56,9 +56,8 @@ class RedLockCloudAccount(object):
     def get_alerts(self, policy_type=None, status="open"):
 
         querystring = {
-                    "timeType": "relative",
-                    "timeAmount": "1000",
-                    "timeUnit": "week",
+                    "timeType": "to_now",
+                    "timeUnit": "epoch",
                     "detailed": False,
                     "alert.status": status,
                     "cloud.accountId": self.account_id,
