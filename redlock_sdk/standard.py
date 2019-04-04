@@ -94,11 +94,12 @@ class RedLockStandard(object):
 
 
 
-    def add_requirement(self, requirement_number, name, description=None):
+    def add_requirement(self, requirement_number, name, order, description=None):
         '''Add a requirement (ie top-level section) to this standard'''
         payload = {
             "name": name,
-            "requirementId": requirement_number
+            "requirementId": requirement_number,
+            "viewOrder": order
         }
         if description is not None:
             payload['description'] = description
@@ -191,7 +192,6 @@ class RedLockStandardRequirement(object):
             "description": description
         }
         response = self.api.post(f"compliance/{self.uuid}/section", data=payload)
-        return(response.text)
 
         # Now go find that section, because I don't know what uuid it was created as
         all_secs = self.sections_by_key('sectionId') # This will map to section_number
@@ -283,6 +283,23 @@ class RedLockStandardSection(object):
         response = self.api.get(f"v2/alert", params=querystring)
         return(response.json())
 
+    def get_complianceData(self):
+        '''Return the complianceId which is a unique id in the policy API for this combination of standard/requirement/section.'''
+        blob = self.api.get("policy/compliance").json()
+
+        print(self.standard.name)
+
+        if self.standard.name not in blob:
+            logger.error("Standard Not found")
+            return(None)
+
+        standard_blob = blob[self.standard.name]
+        for s in standard_blob:
+
+            if s['requirementId'] == self.requirement.requirementId and s['requirementName'] == self.requirement.name and s['sectionId'] == self.sectionId and s['standardName'] == self.standard.name :
+                return(s)
+        # Not found
+        return(None)
 
 class RedLockPolicy(object):
     """
@@ -304,25 +321,13 @@ class RedLockPolicy(object):
         """Create a useful string for this class if referenced"""
         return(f"<RedLockPolicy [{self.uuid}] {self.name}>")
 
-    def add_section(self, redlockSection):
+    def add_section(self, complianceData):
         '''https://api.docs.redlock.io/reference#update-policy'''
 
         policy = copy.deepcopy(self.policyData)
-
-        new_standard = {
-                        "complianceId": redlockSection.standard.uuid,
-                        "standardDescription": redlockSection.standard.description,
-                        "standardName": redlockSection.standard.name,
-                        "customAssigned": False,
-                        "policyId": self.uuid,
-                        "requirementId": redlockSection.requirement.requirementId,
-                        "requirementName": redlockSection.requirement.name,
-                        "sectionId": redlockSection.sectionId,
-                        "sectionLabel": redlockSection.sectionId,
-                        "sectionDescription": redlockSection.description,
-                        "systemDefault": False
-                      }
-        policy['complianceMetadata'].append(new_standard)
+        complianceData['policyId'] = self.uuid
+        complianceData['customAssigned'] = True
+        policy['complianceMetadata'].append(complianceData)
 
         try:
             response = self.api.put(f"policy/{self.uuid}", data=policy)
