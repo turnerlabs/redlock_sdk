@@ -11,7 +11,6 @@ import time
 from pprint import pprint
 
 try:
-    sys.path.append('..')
     from redlock_sdk import *
 except ImportError as e:
     print("must install redlock sdk")
