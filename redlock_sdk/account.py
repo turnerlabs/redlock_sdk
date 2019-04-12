@@ -28,20 +28,15 @@ class RedLockCloudAccount(object):
 
     def __str__(self):
         """when converted to a string, become the account_id"""
+        if not hasattr(self, "name"):
+            return(f"UnNamed ({self.account_id})")
         return(f"{self.name} ({self.account_id})")
-
-    def __repr__(self):
-        """Create a useful string for this class if referenced"""
-        return(f"<RedLockCloudAccount [{self.account_id}] {self.name} >")
 
     def __init__(self):
         raise NotImplementedError # Implemented by children
 
-    def update(self):
-        raise NotImplementedError # Implemented by children
-
     def delete(self):
-        raise NotImplementedError # Implemented by children
+        raise NotImplementedError
 
     def get(self):
         '''Get the data from the API for this account'''
@@ -54,7 +49,7 @@ class RedLockCloudAccount(object):
         return(response.text)
 
     def get_alerts(self, policy_type=None, status="open"):
-
+        '''return all alerts for all time, filtered for this account'''
         querystring = {
                     "timeType": "to_now",
                     "timeUnit": "epoch",
@@ -90,6 +85,9 @@ class RedLockAWSAccount(RedLockCloudAccount):
         self.cloud_type = "aws"
         self.get()
 
+    def __repr__(self):
+        """Create a useful string for this class if referenced"""
+        return(f"<RedLockAWSAccount [{self.account_id}] {self.name} >")
 
 class RedLockAzureAccount(RedLockCloudAccount):
     """
@@ -103,24 +101,75 @@ class RedLockAzureAccount(RedLockCloudAccount):
         self.cloud_type = "azure"
         self.get()
 
+    def __repr__(self):
+        """Create a useful string for this class if referenced"""
+        return(f"<RedLockAzureAccount [{self.account_id}] {self.name} >")
+
 class RedLockGCPAccount(RedLockCloudAccount):
     """
-    Abstraction class for an Azure Account
+    Abstraction class for an GCP Project / Organizational parent
     """
     def __init__(self, api, project_id, debug=False):
         # super(RedLockStandard, self).__init__()
         self.api = api
         self.debug = debug
         self.account_id = project_id
-        self.cloud_type = "azure"
+        self.cloud_type = "gcp"
         self.get()
+
+    def get_subaccounts(self):
+        '''Get the data from the API for this account'''
+        results = self.api.get(f"cloud/{self.cloud_type}/{self.account_id}/project").json()
+        self.sub_accounts = {}
+        for s in results:
+            # print(s)
+            self.sub_accounts[s['accountId']] = RedLockGCPSubAccount(self.api, s['accountId'], self.account_id)
+
+    def __repr__(self):
+        """Create a useful string for this class if referenced"""
+        return(f"<RedLockGCPAccount [{self.account_id}] {self.name} >")
+
+
+class RedLockGCPSubAccount(RedLockCloudAccount):
+    """
+    Abstraction class for an GCP Project / Organizational parent
+    """
+    def __init__(self, api, project_id, parent_id, debug=False):
+        # super(RedLockStandard, self).__init__()
+        self.api = api
+        self.debug = debug
+        self.account_id = project_id
+        self.parent_id = parent_id
+        self.cloud_type = "gcp"
+        self.get()
+
+    # need to override this for a subaccount
+    def get(self):
+        '''Get the data from the API for this account'''
+        results = self.api.get(f"cloud/{self.cloud_type}/{self.parent_id}/project").json()
+        for s in results:
+            if s['accountId'] == self.account_id:
+                self.cloudData = s
+                # print(s)
+                self.__dict__.update(self.cloudData)
+                return()
+        raise Exception(f"projectId {self.account_id} was not found for organization {self.parent_id}")
+
+    def update(self):
+        raise NotImplementedError # Sub Accounts can't be updated
+
+    def delete(self):
+        raise NotImplementedError # Sub Accounts can't be deleted
+
+    def __repr__(self):
+        """Create a useful string for this class if referenced"""
+        return(f"<RedLockGCPSubAccount [{self.account_id}] {self.name} >")
 
 
 class RedLockAccountGroup(object):
     """
     Abstraction class for a Cloud AccountGroup in RedLock
     """
-
     def __init__(self, api, group_name, group_id=None, debug=False):
         # super(RedLockStandard, self).__init__()
         self.api = api
@@ -136,7 +185,6 @@ class RedLockAccountGroup(object):
         self.group_id = group_id
         self.get()
 
-
     @classmethod
     def create(cls, rl_api, group_name, description):
         '''Classmethod to create a new account group'''
@@ -150,6 +198,14 @@ class RedLockAccountGroup(object):
         # Now return an instantiated class
         return(cls(rl_api, group_name))
 
+    @classmethod
+    def all(cls, rl_api):
+        '''Classmethod to return an hash of all RedLockAccountGroup indexed by name'''
+        output = {}
+        account_groups = rl_api.get("cloud/group").json()
+        for g in account_groups:
+            output[g['name']] = RedLockAccountGroup(rl_api, g['name'], group_id=g['id'])
+        return(output)
 
     def __find_id__(self, group_name):
         '''Given the name (primary key) get the id (which is neede by the API)'''
@@ -158,7 +214,6 @@ class RedLockAccountGroup(object):
             if g['name'] == group_name:
                 return(g['id'])
         return(None)
-
 
     def __str__(self):
         """when converted to a string, become the account_id"""
@@ -177,8 +232,18 @@ class RedLockAccountGroup(object):
 
     def get(self):
         '''Get the data from the API for this account group'''
-        self.groupData = self.api.get(f"cloud/group/{self.group_id}").json()
-        self.__dict__.update(self.groupData)
+
+        # This call doesn't return the same data that the /cloud/group returns.
+        # self.groupData = self.api.get(f"cloud/group/{self.group_id}").json()
+
+        # Pull everything and find the one block I need
+        all_groups = self.api.get(f"cloud/group/").json()
+        for g in all_groups:
+            if g['id'] == self.group_id:
+                self.groupData = g
+                self.__dict__.update(self.groupData)
+                return
+        raise Exception
 
     def update(self):
         '''Update this AccountGroup. Note: Not all of the GroupData should be set back on the update  '''
@@ -209,6 +274,13 @@ class RedLockAccountGroup(object):
         response = self.api.get(f"v2/alert", params=querystring)
         return(response.json())
 
+    def get_account_ids_by_cloud_type(self, cloud_type):
+        output = []
+        for a in self.accounts:
+            if a['type'] == cloud_type:
+                output.append(a['id'])
+        return(output)
+
     def add_account(self, cloud_account):
         '''add an account to this account group'''
         self.accountIds.append(cloud_account.account_id)
@@ -232,21 +304,7 @@ class RedLockAccountGroup(object):
                 output.append(RedLockAzureAccount(self.api, a['id']))
         return(output)
 
-    def create_report(self, complianceStandard, cloud_type):
-        '''Create a report for this AccountGroup'''
-        payload = {
-            "cloudType": cloud_type,
-            "name": f"{self.name}-{complianceStandard.name}",
-            "target": {
-                "accounts": self.accountIds,
-                "regions":[],
-                "timeRange": {
-                    "type": "to_now",
-                    "value": "epoch"
-                }
-            },
-            "type": complianceStandard.name
-        }
+
 
 
 

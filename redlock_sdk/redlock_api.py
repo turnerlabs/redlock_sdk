@@ -127,14 +127,17 @@ class RedLockAPI(object):
         if response.status_code == 200:
             return(response)
         else:
-            raise RedLockAPIError(response)
+            if 'x-redlock-status' in response.headers and response.headers['x-redlock-status'][0]['i18nKey'] == "not_found":
+                raise RedLockResourceNotFound(response)
+            else:
+                raise RedLockAPIError(response)
 
 
     def put(self, path, data=None):
         '''Executes a PUT operation against the API for the path specificed'''
 
         if self.header is None:
-            raise RedLockAPIUnauthenticated(f"Cannot get {path}: Not Authenticated")
+            raise RedLockAPIUnauthenticated(f"Cannot put {path}: Not Authenticated")
 
         url = f"{self.endpoint}/{path}"
 
@@ -142,18 +145,16 @@ class RedLockAPI(object):
             logger.debug(f"Putting {url} with data {data}")
 
         response = self.client.put(url, data=json.dumps(data))
-        if response.status_code == 200:
+        if response.status_code == 200 or response.status_code == 204:
             return(response)
         else:
             raise RedLockAPIError(response)
-
-
 
     def post(self, path, data=None):
         '''Executes a POST operation against the API for the path specificed'''
 
         if self.header is None:
-            raise RedLockAPIUnauthenticated(f"Cannot get {path}: Not Authenticated")
+            raise RedLockAPIUnauthenticated(f"Cannot post {path}: Not Authenticated")
 
         url = f"{self.endpoint}/{path}"
 
@@ -165,16 +166,40 @@ class RedLockAPI(object):
             logger.debug(f"Headers: {response.headers}")
             logger.debug(f"Body: {response.text}")
 
-        if response.status_code == 200:
+        if response.status_code == 200 or response.status_code == 204:
             return(response)
         else:
             raise RedLockAPIError(response)
 
+    def delete(self, path):
+        '''Executes a DELETE operation against the API for the path specificed'''
 
+        if self.header is None:
+            raise RedLockAPIUnauthenticated(f"Cannot delete {path}: Not Authenticated")
+
+        url = f"{self.endpoint}/{path}"
+
+        if self.debug:
+            logger.debug(f"Deleting {url}")
+
+        response = self.client.delete(url)
+        if self.debug:
+            logger.debug(f"Headers: {response.headers}")
+            logger.debug(f"Body: {response.text}")
+
+        if response.status_code == 200 or response.status_code == 204:
+            return(response)
+        else:
+            if 'x-redlock-status' in response.headers and response.headers['x-redlock-status'][0]['i18nKey'] == "not_found":
+                raise RedLockResourceNotFound(response)
+            else:
+                raise RedLockAPIError(response)
 
 class RedLockAPIError(Exception):
     '''raised when the RedLock API fails to process a request'''
     def __init__(self, response):
+        if 'x-redlock-status' not in response.headers:
+            response.raise_for_status()
         self.message = f"{response.status_code} - {response.reason}: {response.headers['x-redlock-status']}"
         self.status_code = response.status_code
         self.reason = response.reason
@@ -183,6 +208,10 @@ class RedLockAPIError(Exception):
         self.rl_error_count = len(self.rl_status)
         super().__init__(self.message)
 
+class RedLockResourceNotFound(RedLockAPIError):
+    '''raised when the RedLock API fails to process a request'''
+    def __init__(self, response):
+        super().__init__(response)
 
 
 class RedLockAPIUnauthenticated(Exception):
